@@ -206,11 +206,13 @@ func main() {
 					}
 					jmsg, err := process(bufio.NewReader(file))
 					if err != nil {
-						log.Fatalf("Error parsing envelope: %v ", err)
+						log.Printf("Error parsing envelope: %v ", err)
+						continue
 					}
 					j, err := easyjson.Marshal(*jmsg)
 					if err != nil {
-						log.Fatalf("Error serializing JSON: %v", err)
+						log.Printf("Error serializing JSON: %v", err)
+						continue
 					}
 					proc.Add(elastic.NewBulkIndexRequest().Index(*elasticIndex).Type("msg").Id(jmsg.Id).Doc(string(j)))
 					wg.Done()
