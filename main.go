@@ -218,8 +218,34 @@ func main() {
 			}()
 		}
 		for _, filename := range flag.Args() {
-			wg.Add(1)
-			tasks <- filename
+			f, err := os.Stat(filename)
+			if err != nil {
+				log.Fatalf("Could not stat file: %v", err)
+			}
+			if f.Mode().IsDir() {
+				err = filepath.Walk(filename, func(path string, _ os.FileInfo, err error) error {
+					if err != nil {
+						return err
+					}
+					f, err := os.Stat(path)
+					if err != nil {
+						log.Fatalf("Could not stat file: %v", err)
+					}
+					if f.Mode().IsRegular() {
+						wg.Add(1)
+						tasks <- path
+					} else {
+						log.Printf("Not a file: %s", path)
+					}
+					return nil
+				})
+				if err != nil {
+					log.Fatalf("Could not walk file: %v", err)
+				}
+			} else {
+				wg.Add(1)
+				tasks <- filename
+			}
 		}
 		wg.Wait()
 	}
