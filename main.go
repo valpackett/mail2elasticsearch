@@ -3,9 +3,11 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/hex"
 	"flag"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -13,14 +15,17 @@ import (
 	"net/mail"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
 
+	"github.com/dchest/safefile"
+	"github.com/gogits/chardet"
 	"github.com/mailru/easyjson"
 	blake2b "github.com/minio/blake2b-simd"
 	"github.com/veqryn/go-email/email"
-	"golang.org/x/text/encoding/ianaindex"
+	"golang.org/x/text/encoding/htmlindex"
 	elastic "gopkg.in/olivere/elastic.v5"
 )
 
@@ -28,6 +33,10 @@ var attachdir = flag.String("attachdir", "files", "path to the attachments direc
 var elasticUrl = flag.String("elastic", "http://127.0.0.1:9200", "URL of the ElasticSearch server")
 var elasticIndex = flag.String("index", "mail", "name of the ElasticSearch index")
 var doInit = flag.Bool("init", false, "whether to initialize the index instead of indexing mail")
+var htmlDetector = chardet.NewHtmlDetector()
+var textDetector = chardet.NewTextDetector()
+var wordDecoder = new(mime.WordDecoder)
+var addrNumRegex = regexp.MustCompile(`>\s*\(\d+\)`) // For fixing stuff like: "Some Name" <mail@example.com> (19290960)
 
 const indexSettings string = `{
 	"mappings": {
@@ -70,9 +79,9 @@ type JMessage struct {
 func normalizeAddrs(vals []string) []string {
 	result := make([]string, 0)
 	for _, val := range vals {
-		addrs, err := mail.ParseAddressList(val)
+		addrs, err := mail.ParseAddressList(addrNumRegex.ReplaceAllString(val, ">"))
 		if err != nil {
-			log.Printf("Could not parse address list: %s", val)
+			log.Printf("Could not parse address list, skipping normalization: %s", val)
 			result = append(result, val)
 		} else {
 			for _, addr := range addrs {
@@ -81,6 +90,47 @@ func normalizeAddrs(vals []string) []string {
 		}
 	}
 	return result
+}
+
+func decodeCharset(charset string, body []byte, description string, ishtml bool) ([]byte, string, error) {
+	var err error
+	if charset == "" {
+		var detenc *chardet.Result
+		if ishtml {
+			detenc, err = htmlDetector.DetectBest(body)
+		} else {
+			detenc, err = textDetector.DetectBest(body)
+		}
+		if err != nil {
+			charset = detenc.Charset
+			log.Printf("No charset in %s, detected %s (lang %s, confidence %d%%)",
+				description, detenc.Charset, detenc.Language, detenc.Confidence)
+		} else {
+			charset = "utf-8"
+			log.Printf("No charset in %s, detected nothing, assuming UTF-8", description)
+		}
+	}
+	enc, err := htmlindex.Get(charset)
+	if err != nil || enc == nil {
+		return nil, charset, err
+	}
+	decoded, err := enc.NewDecoder().Bytes(body)
+	if err != nil {
+		return nil, charset, err
+	}
+	return decoded, charset, nil
+}
+
+func decodeReader(charset string, input io.Reader) (io.Reader, error) {
+	body, err := ioutil.ReadAll(input)
+	if err != nil {
+		return nil, err
+	}
+	decoded, _, err := decodeCharset(charset, body, fmt.Sprintf("header '%s'", body), false)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewReader(decoded), nil
 }
 
 func jsonifyMsg(msg email.Message) JMessage {
@@ -95,12 +145,22 @@ func jsonifyMsg(msg email.Message) JMessage {
 		Attachment: "",
 	}
 	delete(result.Header, "Message-Id")
-	result.Header["From"] = normalizeAddrs(msg.Header["From"])
-	result.Header["To"] = normalizeAddrs(msg.Header["To"])
-	result.Header["Cc"] = normalizeAddrs(msg.Header["Cc"])
-	result.Header["Bcc"] = normalizeAddrs(msg.Header["Bcc"])
-	result.Header["Return-Path"] = normalizeAddrs(msg.Header["Return-Path"])
-	result.Header["Delivered-To"] = normalizeAddrs(msg.Header["Delivered-To"])
+	for k, vs := range result.Header {
+		for i, v := range vs {
+			dec, err := wordDecoder.DecodeHeader(v)
+			if err != nil {
+				log.Printf("Could not decode header %s [%d] '%s': %v", k, i, v, err)
+				continue
+			}
+			result.Header[k][i] = dec
+		}
+	}
+	result.Header["From"] = normalizeAddrs(result.Header["From"])
+	result.Header["To"] = normalizeAddrs(result.Header["To"])
+	result.Header["Cc"] = normalizeAddrs(result.Header["Cc"])
+	result.Header["Bcc"] = normalizeAddrs(result.Header["Bcc"])
+	result.Header["Return-Path"] = normalizeAddrs(result.Header["Return-Path"])
+	result.Header["Delivered-To"] = normalizeAddrs(result.Header["Delivered-To"])
 	if msg.SubMessage != nil {
 		submsg := jsonifyMsg(*msg.SubMessage)
 		result.SubMessage = &submsg
@@ -111,27 +171,25 @@ func jsonifyMsg(msg email.Message) JMessage {
 			result.Parts = append(result.Parts, &partmsg)
 		}
 	}
-	if strings.HasPrefix(msg.Header.Get("Content-Type"), "text") {
-		_, params, err := mime.ParseMediaType(msg.Header.Get("Content-Type"))
+	ctype := result.Header.Get("Content-Type")
+	if strings.HasPrefix(ctype, "text") {
+		mediatype, params, err := mime.ParseMediaType(ctype)
 		if err != nil {
-			log.Printf("Unreadable Content-Type: %s: %v", msg.Header.Get("Content-Type"), err)
-			goto file
+			if strings.Contains(ctype, "html") {
+				mediatype = "text/html"
+			} else {
+				mediatype = "text/plain"
+			}
+			params = make(map[string]string)
+			log.Printf("Unreadable Content-Type: %s: %v, assuming %s", ctype, err, mediatype)
 		}
-		if params["charset"] == "" {
-			log.Printf("No charset in Content-Type: %s, assuming UTF-8", msg.Header.Get("Content-Type"))
-			params["charset"] = "utf-8"
-		}
-		if params["charset"] == "us-ascii" {
-			params["charset"] = "utf-8"
-		}
-		enc, err := ianaindex.IANA.Encoding(params["charset"])
-		if err != nil || enc == nil {
-			log.Printf("Unknown encoding %s: %v", params["charset"], err)
-			goto file
-		}
-		decoded, err := enc.NewDecoder().Bytes(msg.Body)
+		decoded, charset, err := decodeCharset(
+			params["charset"],
+			msg.Body,
+			fmt.Sprintf("Content-Type: %s", ctype),
+			strings.Contains(mediatype, "html"))
 		if err != nil {
-			log.Printf("Could not decode %s: %v", params["charset"], err)
+			log.Printf("Could not decode body (%s): %v", charset, err)
 			goto file
 		}
 		result.TextBody = string(decoded)
@@ -141,9 +199,22 @@ file:
 	hash := blake2b.Sum256(msg.Body)
 	path := filepath.Join(*attachdir, hex.EncodeToString(hash[:]))
 	result.Attachment = path
-	err := ioutil.WriteFile(path, msg.Body, 0444)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		log.Printf("File already exists: %s", path)
+		return result
+	}
+	f, err := safefile.Create(path, 0444)
 	if err != nil {
-		log.Printf("Could not write file %s: %v", path, err)
+		log.Printf("Could not open file %s: %v", path, err)
+	}
+	defer f.Close()
+	_, err = f.Write(msg.Body)
+	if err != nil {
+		log.Printf("Could not write to file %s: %v", path, err)
+	}
+	err = f.Commit()
+	if err != nil {
+		log.Printf("Could not commit file %s: %v", path, err)
 	}
 	return result
 }
@@ -159,6 +230,7 @@ func process(msgtext io.Reader) (*JMessage, error) {
 }
 
 func main() {
+	wordDecoder.CharsetReader = decodeReader
 	flag.Parse()
 	ctx := context.Background()
 	client, err := elastic.NewClient(
