@@ -3,6 +3,18 @@
 
 [[projects]]
   branch = "master"
+  name = "github.com/dchest/safefile"
+  packages = ["."]
+  revision = "855e8d98f1852d48dde521e0522408d1fe7e836a"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/gogits/chardet"
+  packages = ["."]
+  revision = "2404f777256163ea3eadb273dada5dcb037993c0"
+
+[[projects]]
+  branch = "master"
   name = "github.com/mailru/easyjson"
   packages = [".","buffer","jlexer","jwriter"]
   revision = "2f5df55504ebc322e4d52d34df6a1f5b503bf26d"
@@ -14,6 +26,12 @@
   revision = "3f5f724cb5b182a5c278d6d3d55b40e7f8c2efb4"
 
 [[projects]]
+  name = "github.com/pkg/errors"
+  packages = ["."]
+  revision = "645ef00459ed84a119197bfb8d8205042c6df63d"
+  version = "v0.8.0"
+
+[[projects]]
   branch = "master"
   name = "github.com/veqryn/go-email"
   packages = ["email"]
@@ -22,12 +40,18 @@
 [[projects]]
   branch = "master"
   name = "golang.org/x/text"
-  packages = ["encoding","encoding/charmap","encoding/ianaindex","encoding/internal","encoding/internal/identifier","encoding/japanese","encoding/korean","encoding/simplifiedchinese","encoding/traditionalchinese","encoding/unicode","internal/gen","internal/utf8internal","runes","transform","unicode/cldr"]
+  packages = ["encoding","encoding/charmap","encoding/htmlindex","encoding/internal","encoding/internal/identifier","encoding/japanese","encoding/korean","encoding/simplifiedchinese","encoding/traditionalchinese","encoding/unicode","internal/gen","internal/tag","internal/utf8internal","language","runes","transform","unicode/cldr"]
   revision = "3bd178b88a8180be2df394a1fbb81313916f0e7b"
+
+[[projects]]
+  name = "gopkg.in/olivere/elastic.v5"
+  packages = [".","config","uritemplates"]
+  revision = "e8c9fc5c302ede16c26837ee0ac8ed6301a5806f"
+  version = "v5.0.51"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "be522479ad43e0b9cf4717759460522dec22a4582fd60802272f7adbb14b87e2"
+  inputs-digest = "a2a32119b7d482e2d3339a753c07a3a35337b141d967a734c4a07b0435e11c57"
   solver-name = "gps-cdcl"
   solver-version = 1
