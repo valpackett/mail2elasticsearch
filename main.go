@@ -12,6 +12,8 @@ import (
 	"io/ioutil"
 	"log"
 	"mime"
+	"net/http"
+	_ "net/http/pprof"
 	"net/mail"
 	"os"
 	"path/filepath"
@@ -33,6 +35,7 @@ var attachdir = flag.String("attachdir", "files", "path to the attachments direc
 var elasticUrl = flag.String("elastic", "http://127.0.0.1:9200", "URL of the ElasticSearch server")
 var elasticIndex = flag.String("index", "mail", "name of the ElasticSearch index")
 var doInit = flag.Bool("init", false, "whether to initialize the index instead of indexing mail")
+var profileaddr = flag.String("profileaddr", "", "address for the performance profiler server to listen on")
 var htmlDetector = chardet.NewHtmlDetector()
 var textDetector = chardet.NewTextDetector()
 var wordDecoder = new(mime.WordDecoder)
@@ -232,6 +235,11 @@ func process(msgtext io.Reader) (*JMessage, error) {
 func main() {
 	wordDecoder.CharsetReader = decodeReader
 	flag.Parse()
+	if *profileaddr != "" {
+		go func() {
+			log.Println(http.ListenAndServe(*profileaddr, nil))
+		}()
+	}
 	ctx := context.Background()
 	client, err := elastic.NewClient(
 		elastic.SetURL(*elasticUrl),
