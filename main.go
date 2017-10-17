@@ -14,7 +14,6 @@ import (
 	"mime"
 	"net/http"
 	_ "net/http/pprof"
-	"net/mail"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -39,7 +38,7 @@ var profileaddr = flag.String("profileaddr", "", "address for the performance pr
 var htmlDetector = chardet.NewHtmlDetector()
 var textDetector = chardet.NewTextDetector()
 var wordDecoder = new(mime.WordDecoder)
-var addrNumRegex = regexp.MustCompile(`>\s*\(\d+\)`) // For fixing stuff like: "Some Name" <mail@example.com> (19290960)
+var addrSplitRegex = regexp.MustCompile(`\s*,\s*`)
 
 const indexSettings string = `{
 	"mappings": {
@@ -48,16 +47,9 @@ const indexSettings string = `{
 				"h": {
 					"properties": {
 						"Date": { "type": "date", "format": "EEE, dd MMM yyyy HH:mm:ss Z" },
-						"Subject": { "type": "text" },
-						"Message-Id": { "type": "keyword" },
-						"From": { "type": "keyword" },
-						"To": { "type": "keyword" },
-						"Cc": { "type": "keyword" },
-						"Bcc": { "type": "keyword" },
-						"Return-Path": { "type": "keyword" },
-						"Delivered-To": { "type": "keyword" },
 						"Dkim-Signature": { "type": "text", "index": false },
-						"X-Google-Dkim-Signature": { "type": "text", "index": false }
+						"X-Google-Dkim-Signature": { "type": "text", "index": false },
+						"MIME-Version": { "type": "text", "index": false }
 					}
 				},
 				"a": { "type": "keyword" },
@@ -79,17 +71,12 @@ type JMessage struct {
 	Attachment string       `json:"a,omitempty"`
 }
 
-func normalizeAddrs(vals []string) []string {
+func splitAddrs(vals []string) []string {
 	result := make([]string, 0)
 	for _, val := range vals {
-		addrs, err := mail.ParseAddressList(addrNumRegex.ReplaceAllString(val, ">"))
-		if err != nil {
-			log.Printf("Could not parse address list, skipping normalization: %s", val)
-			result = append(result, val)
-		} else {
-			for _, addr := range addrs {
-				result = append(result, addr.Address)
-			}
+		addrs := addrSplitRegex.Split(val, -1)
+		for _, addr := range addrs {
+			result = append(result, addr)
 		}
 	}
 	return result
@@ -158,12 +145,12 @@ func jsonifyMsg(msg email.Message) JMessage {
 			result.Header[k][i] = dec
 		}
 	}
-	result.Header["From"] = normalizeAddrs(result.Header["From"])
-	result.Header["To"] = normalizeAddrs(result.Header["To"])
-	result.Header["Cc"] = normalizeAddrs(result.Header["Cc"])
-	result.Header["Bcc"] = normalizeAddrs(result.Header["Bcc"])
-	result.Header["Return-Path"] = normalizeAddrs(result.Header["Return-Path"])
-	result.Header["Delivered-To"] = normalizeAddrs(result.Header["Delivered-To"])
+	result.Header["From"] = splitAddrs(result.Header["From"])
+	result.Header["To"] = splitAddrs(result.Header["To"])
+	result.Header["Cc"] = splitAddrs(result.Header["Cc"])
+	result.Header["Bcc"] = splitAddrs(result.Header["Bcc"])
+	result.Header["Return-Path"] = splitAddrs(result.Header["Return-Path"])
+	result.Header["Delivered-To"] = splitAddrs(result.Header["Delivered-To"])
 	if msg.SubMessage != nil {
 		submsg := jsonifyMsg(*msg.SubMessage)
 		result.SubMessage = &submsg
