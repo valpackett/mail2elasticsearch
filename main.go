@@ -26,7 +26,7 @@ import (
 	"github.com/gogits/chardet"
 	"github.com/mailru/easyjson"
 	blake2b "github.com/minio/blake2b-simd"
-	"github.com/veqryn/go-email/email"
+	"github.com/myfreeweb/go-email/email"
 	"golang.org/x/text/encoding/htmlindex"
 	elastic "gopkg.in/olivere/elastic.v5"
 )

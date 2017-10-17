@@ -26,16 +26,22 @@
   revision = "3f5f724cb5b182a5c278d6d3d55b40e7f8c2efb4"
 
 [[projects]]
+  branch = "master"
+  name = "github.com/myfreeweb/go-base64-simd"
+  packages = ["base64"]
+  revision = "5b6f2d8a68850717af4bf539e0dc378bd1ca88d1"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/myfreeweb/go-email"
+  packages = ["email"]
+  revision = "022ca2a548a390bdd290f3bdd25d41db77337f4c"
+
+[[projects]]
   name = "github.com/pkg/errors"
   packages = ["."]
   revision = "645ef00459ed84a119197bfb8d8205042c6df63d"
   version = "v0.8.0"
-
-[[projects]]
-  branch = "master"
-  name = "github.com/veqryn/go-email"
-  packages = ["email"]
-  revision = "388713805b1e28295565f252ab14b53e1267b0bc"
 
 [[projects]]
   branch = "master"
@@ -52,6 +58,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "a2a32119b7d482e2d3339a753c07a3a35337b141d967a734c4a07b0435e11c57"
+  inputs-digest = "05c167a169c78f8f864698c99dbe52b580264785121782fc1c346e462897cdae"
   solver-name = "gps-cdcl"
   solver-version = 1

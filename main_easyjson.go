@@ -7,7 +7,7 @@ import (
 	easyjson "github.com/mailru/easyjson"
 	jlexer "github.com/mailru/easyjson/jlexer"
 	jwriter "github.com/mailru/easyjson/jwriter"
-	email "github.com/veqryn/go-email/email"
+	email "github.com/myfreeweb/go-email/email"
 )
 
 // suppress unused package warning
