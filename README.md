@@ -24,11 +24,15 @@ $ mail2elasticsearch /mail/cur # recursive walk (e.g. initial bulk indexing)
 ### Development
 
 ```bash
+$ dep ensure
 $ mail2elasticsearch -srvaddr 127.0.0.1:42069 -attachdir /tmp/files ~/testmail/cur 2>&1 | humanlog
+$ go-torch -u http://127.0.0.1:42069/ -t 120 --binaryname=mail2elasticsearch
+$ expvarmon -ports="http://127.0.0.1:42069"
 ```
 
 Use
 
+- [dep](https://github.com/golang/dep) to get dependencies
 - [humanlog](https://github.com/aybabtme/humanlog) to read logs in development
 - [go-torch](https://github.com/uber/go-torch) to profile with flamegraphs
 - [expvarmon](https://github.com/divan/expvarmon) to monitor stats
