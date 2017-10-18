@@ -10,10 +10,10 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"mime"
 	"net/http"
 	_ "net/http/pprof"
+	_ "expvar"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,6 +26,7 @@ import (
 	"github.com/mailru/easyjson"
 	blake2b "github.com/minio/blake2b-simd"
 	"github.com/myfreeweb/go-email/email"
+	zap "go.uber.org/zap"
 	"golang.org/x/text/encoding/htmlindex"
 	elastic "gopkg.in/olivere/elastic.v5"
 )
@@ -34,10 +35,10 @@ var attachdir = flag.String("attachdir", "files", "path to the attachments direc
 var elasticUrl = flag.String("elastic", "http://127.0.0.1:9200", "URL of the ElasticSearch server")
 var elasticIndex = flag.String("index", "mail", "name of the ElasticSearch index")
 var doInit = flag.Bool("init", false, "whether to initialize the index instead of indexing mail")
-var profileaddr = flag.String("profileaddr", "", "address for the performance profiler server to listen on")
+var inProd = flag.Bool("prod", false, "are we running in production (impacts logging)")
+var srvAddr = flag.String("srvaddr", "", "address for the pprof/expvar server to listen on")
 var htmlDetector = chardet.NewHtmlDetector()
 var textDetector = chardet.NewTextDetector()
-var wordDecoder = new(mime.WordDecoder)
 var addrSplitRegex = regexp.MustCompile(`\s*,\s*`)
 
 const indexSettings string = `{
@@ -82,7 +83,7 @@ func splitAddrs(vals []string) []string {
 	return result
 }
 
-func decodeCharset(charset string, body []byte, description string, ishtml bool) ([]byte, string, error) {
+func decodeCharset(charset string, body []byte, description string, ishtml bool, log *zap.SugaredLogger) ([]byte, string, error) {
 	var err error
 	if charset == "" {
 		var detenc *chardet.Result
@@ -93,11 +94,11 @@ func decodeCharset(charset string, body []byte, description string, ishtml bool)
 		}
 		if err != nil {
 			charset = detenc.Charset
-			log.Printf("No charset in %s, detected %s (lang %s, confidence %d%%)",
-				description, detenc.Charset, detenc.Language, detenc.Confidence)
+			log.Infow("Using detected charset", "where", description, "detected", detenc.Charset,
+				"lang", detenc.Language, "confidence", detenc.Confidence)
 		} else {
 			charset = "utf-8"
-			log.Printf("No charset in %s, detected nothing, assuming UTF-8", description)
+			log.Infow("Could not detect charset, assuming UTF-8", "where", description)
 		}
 	}
 	enc, err := htmlindex.Get(charset)
@@ -111,19 +112,23 @@ func decodeCharset(charset string, body []byte, description string, ishtml bool)
 	return decoded, charset, nil
 }
 
-func decodeReader(charset string, input io.Reader) (io.Reader, error) {
+func decodeReader(charset string, input io.Reader, log *zap.SugaredLogger) (io.Reader, error) {
 	body, err := ioutil.ReadAll(input)
 	if err != nil {
 		return nil, err
 	}
-	decoded, _, err := decodeCharset(charset, body, fmt.Sprintf("header '%s'", body), false)
+	decoded, _, err := decodeCharset(charset, body, fmt.Sprintf("header '%s'", body), false, log)
 	if err != nil {
 		return nil, err
 	}
 	return bytes.NewReader(decoded), nil
 }
 
-func jsonifyMsg(msg email.Message) JMessage {
+func jsonifyMsg(msg email.Message, log *zap.SugaredLogger) JMessage {
+	wordDecoder := new(mime.WordDecoder)
+	wordDecoder.CharsetReader = func(charset string, input io.Reader) (io.Reader, error) {
+		return decodeReader(charset, input, log)
+	}
 	result := JMessage{
 		Id:         msg.Header.Get("Message-Id"),
 		Header:     msg.Header,
@@ -139,7 +144,7 @@ func jsonifyMsg(msg email.Message) JMessage {
 		for i, v := range vs {
 			dec, err := wordDecoder.DecodeHeader(v)
 			if err != nil {
-				log.Printf("Could not decode header %s [%d] '%s': %v", k, i, v, err)
+				log.Warnw("Could not decode header", "name", k, "index", i, "value", v, "err", err)
 				continue
 			}
 			result.Header[k][i] = dec
@@ -152,12 +157,12 @@ func jsonifyMsg(msg email.Message) JMessage {
 	result.Header["Return-Path"] = splitAddrs(result.Header["Return-Path"])
 	result.Header["Delivered-To"] = splitAddrs(result.Header["Delivered-To"])
 	if msg.SubMessage != nil {
-		submsg := jsonifyMsg(*msg.SubMessage)
+		submsg := jsonifyMsg(*msg.SubMessage, log.With("submsg", true))
 		result.SubMessage = &submsg
 	}
-	for _, part := range msg.Parts {
+	for partidx, part := range msg.Parts {
 		if part != nil {
-			partmsg := jsonifyMsg(*part)
+			partmsg := jsonifyMsg(*part, log.With("partidx", partidx))
 			result.Parts = append(result.Parts, &partmsg)
 		}
 	}
@@ -171,15 +176,16 @@ func jsonifyMsg(msg email.Message) JMessage {
 				mediatype = "text/plain"
 			}
 			params = make(map[string]string)
-			log.Printf("Unreadable Content-Type: %s: %v, assuming %s", ctype, err, mediatype)
+			log.Warnw("Unreadable Content-Type", "ctype", ctype, "err", err, "assumed", mediatype)
 		}
 		decoded, charset, err := decodeCharset(
 			params["charset"],
 			msg.Body,
 			fmt.Sprintf("Content-Type: %s", ctype),
-			strings.Contains(mediatype, "html"))
+			strings.Contains(mediatype, "html"),
+			log)
 		if err != nil {
-			log.Printf("Could not decode body (%s): %v", charset, err)
+			log.Warnw("Could not decode body, treating like an attachment", "charset", charset, "err", err)
 			goto file
 		}
 		result.TextBody = string(decoded)
@@ -188,43 +194,49 @@ func jsonifyMsg(msg email.Message) JMessage {
 file:
 	hash := blake2b.Sum256(msg.Body)
 	path := filepath.Join(*attachdir, hex.EncodeToString(hash[:]))
+	log = log.With("path", path)
 	result.Attachment = path
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		log.Printf("File already exists: %s", path)
+		log.Debug("Attachment already exists")
 		return result
 	}
 	f, err := safefile.Create(path, 0444)
 	if err != nil {
-		log.Printf("Could not open file %s: %v", path, err)
+		log.Errorw("Could not open file for attachment", "err", err)
+		return result
 	}
 	defer f.Close()
 	_, err = f.Write(msg.Body)
 	if err != nil {
-		log.Printf("Could not write to file %s: %v", path, err)
+		log.Errorw("Could not write attachment", "err", err)
+		return result
 	}
 	err = f.Commit()
 	if err != nil {
-		log.Printf("Could not commit file %s: %v", path, err)
+		log.Errorw("Could not commit attachment", "err", err)
+		return result
 	}
+	log.Info("Saved attachment")
 	return result
 }
 
-func process(msgtext io.Reader) (*JMessage, error) {
-	log.Printf("Parsing...")
+func process(msgtext io.Reader, log *zap.SugaredLogger) (*JMessage, error) {
 	msg, err := email.ParseMessage(msgtext)
 	if err != nil {
 		return nil, err
 	}
-	jmsg := jsonifyMsg(*msg)
+	jmsg := jsonifyMsg(*msg, log)
 	return &jmsg, nil
 }
 
 func main() {
-	wordDecoder.CharsetReader = decodeReader
 	flag.Parse()
-	if *profileaddr != "" {
+	logger, _ := zap.NewProduction()
+	defer logger.Sync()
+	log := logger.Sugar()
+	if *srvAddr != "" {
 		go func() {
-			log.Println(http.ListenAndServe(*profileaddr, nil))
+			log.Infow("pprof/expvar server started", "result", http.ListenAndServe(*srvAddr, nil))
 		}()
 	}
 	ctx := context.Background()
@@ -232,32 +244,32 @@ func main() {
 		elastic.SetURL(*elasticUrl),
 	)
 	if err != nil {
-		log.Fatalf("Could not create ElasticSearch client: %v", err)
+		log.Fatalw("Could not create ElasticSearch client", "err", err)
 	}
 	if *doInit {
 		res, err := client.CreateIndex(*elasticIndex).BodyString(indexSettings).Do(ctx)
 		if err != nil {
-			log.Fatalf("Could not initialize index: %v", err)
+			log.Fatalw("Could not initialize index", "err", err)
 		} else {
-			log.Printf("Result: %v", res)
+			log.Infow("Created index", "result", res)
 		}
 	} else if len(flag.Args()) == 0 || flag.Arg(0) == "-" {
-		jmsg, err := process(bufio.NewReader(os.Stdin))
+		jmsg, err := process(bufio.NewReader(os.Stdin), log.With("filename", "stdin"))
 		if err != nil {
-			log.Fatalf("Error parsing envelope: %v ", err)
+			log.Fatalw("Could not process", "err", err)
 		}
 		j, err := easyjson.Marshal(*jmsg)
 		if err != nil {
-			log.Fatalf("Error serializing JSON: %v", err)
+			log.Fatalw("Could not serialize JSON", "err", err)
 		}
 		_, err = client.Index().Index(*elasticIndex).Type("msg").Id(jmsg.Id).BodyString(string(j)).Do(ctx)
 		if err != nil {
-			log.Fatalf("Error indexing: %v", err)
+			log.Fatalw("Could not index", "err", err)
 		}
 	} else {
 		proc, err := client.BulkProcessor().Name("mail2elasticsearch").Do(ctx)
 		if err != nil {
-			log.Fatalf("Could not start bulk processor: %v", err)
+			log.Fatalw("Could not start bulk processor", "err", err)
 		}
 		defer proc.Close()
 		var wg sync.WaitGroup
@@ -265,23 +277,29 @@ func main() {
 		for i := 0; i < runtime.NumCPU(); i++ {
 			go func() {
 				for {
+					var j []byte
+					var jmsg *JMessage
 					filename := <-tasks
+					log := log.With("filename", filename)
+					log.Debug("Processing start")
 					file, err := os.Open(filename)
 					if err != nil {
-						log.Printf("Error opening file ", err)
-						continue
+						log.Errorw("Could not open file", "err", err)
+						goto done
 					}
-					jmsg, err := process(bufio.NewReader(file))
+					jmsg, err = process(bufio.NewReader(file), log)
 					if err != nil {
-						log.Printf("Error parsing envelope: %v ", err)
-						continue
+						log.Errorw("Could not process", "err", err)
+						goto done
 					}
-					j, err := easyjson.Marshal(*jmsg)
+					j, err = easyjson.Marshal(*jmsg)
 					if err != nil {
-						log.Printf("Error serializing JSON: %v", err)
-						continue
+						log.Errorw("Could not serialize JSON", "err", err)
+						goto done
 					}
 					proc.Add(elastic.NewBulkIndexRequest().Index(*elasticIndex).Type("msg").Id(jmsg.Id).Doc(string(j)))
+					log.Debug("Processing end")
+				done:
 					wg.Done()
 				}
 			}()
@@ -289,7 +307,7 @@ func main() {
 		for _, filename := range flag.Args() {
 			f, err := os.Stat(filename)
 			if err != nil {
-				log.Fatalf("Could not stat file: %v", err)
+				log.Fatalw("Could not stat file", "err", err, "filename", filename)
 			}
 			if f.Mode().IsDir() {
 				err = filepath.Walk(filename, func(path string, _ os.FileInfo, err error) error {
@@ -298,18 +316,18 @@ func main() {
 					}
 					f, err := os.Stat(path)
 					if err != nil {
-						log.Fatalf("Could not stat file: %v", err)
+						log.Fatalw("Could not stat file", "err", err, "filename", path)
 					}
 					if f.Mode().IsRegular() {
 						wg.Add(1)
 						tasks <- path
 					} else {
-						log.Printf("Not a file: %s", path)
+						log.Infow("Not a file", "filename", path)
 					}
 					return nil
 				})
 				if err != nil {
-					log.Fatalf("Could not walk file: %v", err)
+					log.Fatalw("Could not walk directory", "err", err, "filename", filename)
 				}
 			} else {
 				wg.Add(1)
