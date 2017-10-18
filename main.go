@@ -3,31 +3,26 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/hex"
+	_ "expvar"
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"mime"
 	"net/http"
 	_ "net/http/pprof"
-	_ "expvar"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"sync"
 
 	"github.com/dchest/safefile"
-	"github.com/gogits/chardet"
 	"github.com/mailru/easyjson"
 	blake2b "github.com/minio/blake2b-simd"
 	"github.com/myfreeweb/go-email/email"
 	zap "go.uber.org/zap"
-	"golang.org/x/text/encoding/htmlindex"
 	elastic "gopkg.in/olivere/elastic.v5"
 )
 
@@ -37,9 +32,6 @@ var elasticIndex = flag.String("index", "mail", "name of the ElasticSearch index
 var doInit = flag.Bool("init", false, "whether to initialize the index instead of indexing mail")
 var inProd = flag.Bool("prod", false, "are we running in production (impacts logging)")
 var srvAddr = flag.String("srvaddr", "", "address for the pprof/expvar server to listen on")
-var htmlDetector = chardet.NewHtmlDetector()
-var textDetector = chardet.NewTextDetector()
-var addrSplitRegex = regexp.MustCompile(`\s*,\s*`)
 
 const indexSettings string = `{
 	"mappings": {
@@ -72,58 +64,6 @@ type JMessage struct {
 	Attachment string       `json:"a,omitempty"`
 }
 
-func splitAddrs(vals []string) []string {
-	result := make([]string, 0)
-	for _, val := range vals {
-		addrs := addrSplitRegex.Split(val, -1)
-		for _, addr := range addrs {
-			result = append(result, addr)
-		}
-	}
-	return result
-}
-
-func decodeCharset(charset string, body []byte, description string, ishtml bool, log *zap.SugaredLogger) ([]byte, string, error) {
-	var err error
-	if charset == "" {
-		var detenc *chardet.Result
-		if ishtml {
-			detenc, err = htmlDetector.DetectBest(body)
-		} else {
-			detenc, err = textDetector.DetectBest(body)
-		}
-		if err != nil {
-			charset = detenc.Charset
-			log.Infow("Using detected charset", "where", description, "detected", detenc.Charset,
-				"lang", detenc.Language, "confidence", detenc.Confidence)
-		} else {
-			charset = "utf-8"
-			log.Infow("Could not detect charset, assuming UTF-8", "where", description)
-		}
-	}
-	enc, err := htmlindex.Get(charset)
-	if err != nil || enc == nil {
-		return nil, charset, err
-	}
-	decoded, err := enc.NewDecoder().Bytes(body)
-	if err != nil {
-		return nil, charset, err
-	}
-	return decoded, charset, nil
-}
-
-func decodeReader(charset string, input io.Reader, log *zap.SugaredLogger) (io.Reader, error) {
-	body, err := ioutil.ReadAll(input)
-	if err != nil {
-		return nil, err
-	}
-	decoded, _, err := decodeCharset(charset, body, fmt.Sprintf("header '%s'", body), false, log)
-	if err != nil {
-		return nil, err
-	}
-	return bytes.NewReader(decoded), nil
-}
-
 func jsonifyMsg(msg email.Message, log *zap.SugaredLogger) JMessage {
 	wordDecoder := new(mime.WordDecoder)
 	wordDecoder.CharsetReader = func(charset string, input io.Reader) (io.Reader, error) {
@@ -150,12 +90,13 @@ func jsonifyMsg(msg email.Message, log *zap.SugaredLogger) JMessage {
 			result.Header[k][i] = dec
 		}
 	}
-	result.Header["From"] = splitAddrs(result.Header["From"])
-	result.Header["To"] = splitAddrs(result.Header["To"])
-	result.Header["Cc"] = splitAddrs(result.Header["Cc"])
-	result.Header["Bcc"] = splitAddrs(result.Header["Bcc"])
-	result.Header["Return-Path"] = splitAddrs(result.Header["Return-Path"])
-	result.Header["Delivered-To"] = splitAddrs(result.Header["Delivered-To"])
+	result.Header["Date"]         = stripSpaceAndComments(result.Header["Date"])
+	result.Header["From"]         = stripSpaceAndComments(splitAddrs(result.Header["From"]))
+	result.Header["To"]           = stripSpaceAndComments(splitAddrs(result.Header["To"]))
+	result.Header["Cc"]           = stripSpaceAndComments(splitAddrs(result.Header["Cc"]))
+	result.Header["Bcc"]          = stripSpaceAndComments(splitAddrs(result.Header["Bcc"]))
+	result.Header["Return-Path"]  = stripSpaceAndComments(splitAddrs(result.Header["Return-Path"]))
+	result.Header["Delivered-To"] = stripSpaceAndComments(splitAddrs(result.Header["Delivered-To"]))
 	if msg.SubMessage != nil {
 		submsg := jsonifyMsg(*msg.SubMessage, log.With("submsg", true))
 		result.SubMessage = &submsg
