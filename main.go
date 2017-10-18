@@ -30,7 +30,6 @@ var attachdir = flag.String("attachdir", "files", "path to the attachments direc
 var elasticUrl = flag.String("elastic", "http://127.0.0.1:9200", "URL of the ElasticSearch server")
 var elasticIndex = flag.String("index", "mail", "name of the ElasticSearch index")
 var doInit = flag.Bool("init", false, "whether to initialize the index instead of indexing mail")
-var inProd = flag.Bool("prod", false, "are we running in production (impacts logging)")
 var srvAddr = flag.String("srvaddr", "", "address for the pprof/expvar server to listen on")
 
 const indexSettings string = `{
@@ -42,7 +41,7 @@ const indexSettings string = `{
 						"Date": { "type": "date", "format": "EEE, dd MMM yyyy HH:mm:ss Z" },
 						"Dkim-Signature": { "type": "text", "index": false },
 						"X-Google-Dkim-Signature": { "type": "text", "index": false },
-						"MIME-Version": { "type": "text", "index": false }
+						"MIME-Version": { "type": "keyword" }
 					}
 				},
 				"a": { "type": "keyword" },
@@ -65,6 +64,7 @@ type JMessage struct {
 }
 
 func jsonifyMsg(msg email.Message, log *zap.SugaredLogger) JMessage {
+	log = log.With("msgid", msg.Header.Get("Message-Id"))
 	wordDecoder := new(mime.WordDecoder)
 	wordDecoder.CharsetReader = func(charset string, input io.Reader) (io.Reader, error) {
 		return decodeReader(charset, input, log)
@@ -91,12 +91,12 @@ func jsonifyMsg(msg email.Message, log *zap.SugaredLogger) JMessage {
 		}
 	}
 	result.Header["Date"]         = stripSpaceAndComments(result.Header["Date"])
-	result.Header["From"]         = stripSpaceAndComments(splitAddrs(result.Header["From"]))
-	result.Header["To"]           = stripSpaceAndComments(splitAddrs(result.Header["To"]))
-	result.Header["Cc"]           = stripSpaceAndComments(splitAddrs(result.Header["Cc"]))
-	result.Header["Bcc"]          = stripSpaceAndComments(splitAddrs(result.Header["Bcc"]))
-	result.Header["Return-Path"]  = stripSpaceAndComments(splitAddrs(result.Header["Return-Path"]))
-	result.Header["Delivered-To"] = stripSpaceAndComments(splitAddrs(result.Header["Delivered-To"]))
+	result.Header["From"]         = splitAddrs(result.Header["From"])
+	result.Header["To"]           = splitAddrs(result.Header["To"])
+	result.Header["Cc"]           = splitAddrs(result.Header["Cc"])
+	result.Header["Bcc"]          = splitAddrs(result.Header["Bcc"])
+	result.Header["Return-Path"]  = splitAddrs(result.Header["Return-Path"])
+	result.Header["Delivered-To"] = splitAddrs(result.Header["Delivered-To"])
 	if msg.SubMessage != nil {
 		submsg := jsonifyMsg(*msg.SubMessage, log.With("submsg", true))
 		result.SubMessage = &submsg
@@ -108,7 +108,7 @@ func jsonifyMsg(msg email.Message, log *zap.SugaredLogger) JMessage {
 		}
 	}
 	ctype := result.Header.Get("Content-Type")
-	if strings.HasPrefix(ctype, "text") {
+	if strings.HasPrefix(ctype, "text") && !strings.Contains(result.Header.Get("Content-Disposition"), "attachment") {
 		mediatype, params, err := mime.ParseMediaType(ctype)
 		if err != nil {
 			if strings.Contains(ctype, "html") {
@@ -215,7 +215,7 @@ func main() {
 		defer proc.Close()
 		var wg sync.WaitGroup
 		tasks := make(chan string)
-		for i := 0; i < runtime.NumCPU(); i++ {
+		for i := 0; i < runtime.GOMAXPROCS(0); i++ {
 			go func() {
 				for {
 					var j []byte

@@ -11,9 +11,7 @@ func splitAddrs(vals []string) []string {
 	result := make([]string, 0)
 	for _, val := range vals {
 		addrs := addrSplitRegex.Split(val, -1)
-		for _, addr := range addrs {
-			result = append(result, addr)
-		}
+		result = append(result, addrs...)
 	}
 	return result
 }
