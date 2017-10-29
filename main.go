@@ -57,7 +57,7 @@ const indexSettings string = `{
 
 //easyjson:json
 type JMessage struct {
-	Id         string       `json:"_id,omitempty"`
+	Id         string
 	Header     email.Header `json:"h,omitempty"`
 	Preamble   []byte       `json:"pre,omitempty"`
 	Epilogue   []byte       `json:"epi,omitempty"`
