@@ -3,13 +3,16 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/hex"
 	_ "expvar"
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"mime"
+	"mime/quotedprintable"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -21,6 +24,7 @@ import (
 	"github.com/dchest/safefile"
 	"github.com/mailru/easyjson"
 	blake2b "github.com/minio/blake2b-simd"
+	"github.com/myfreeweb/go-base64-simd/base64"
 	"github.com/myfreeweb/go-email/email"
 	zap "go.uber.org/zap"
 	elastic "gopkg.in/olivere/elastic.v5"
@@ -79,6 +83,7 @@ func jsonifyMsg(msg email.Message, log *zap.SugaredLogger) JMessage {
 		TextBody:   "",
 		Attachment: "",
 	}
+	//// Headers
 	delete(result.Header, "Message-Id")
 	for k, vs := range result.Header {
 		for i, v := range vs {
@@ -90,13 +95,14 @@ func jsonifyMsg(msg email.Message, log *zap.SugaredLogger) JMessage {
 			result.Header[k][i] = dec
 		}
 	}
-	result.Header["Date"]         = stripSpaceAndComments(result.Header["Date"])
-	result.Header["From"]         = splitAddrs(result.Header["From"])
-	result.Header["To"]           = splitAddrs(result.Header["To"])
-	result.Header["Cc"]           = splitAddrs(result.Header["Cc"])
-	result.Header["Bcc"]          = splitAddrs(result.Header["Bcc"])
-	result.Header["Return-Path"]  = splitAddrs(result.Header["Return-Path"])
+	result.Header["Date"] = stripSpaceAndComments(result.Header["Date"])
+	result.Header["From"] = splitAddrs(result.Header["From"])
+	result.Header["To"] = splitAddrs(result.Header["To"])
+	result.Header["Cc"] = splitAddrs(result.Header["Cc"])
+	result.Header["Bcc"] = splitAddrs(result.Header["Bcc"])
+	result.Header["Return-Path"] = splitAddrs(result.Header["Return-Path"])
 	result.Header["Delivered-To"] = splitAddrs(result.Header["Delivered-To"])
+	//// Parts
 	if msg.SubMessage != nil {
 		submsg := jsonifyMsg(*msg.SubMessage, log.With("submsg", true))
 		result.SubMessage = &submsg
@@ -107,7 +113,27 @@ func jsonifyMsg(msg email.Message, log *zap.SugaredLogger) JMessage {
 			result.Parts = append(result.Parts, &partmsg)
 		}
 	}
+	//// Body
 	ctype := result.Header.Get("Content-Type")
+	//// Body Transfer-Encoding
+	if result.Header.Get("Content-Transfer-Encoding") == "quoted-printable" {
+		decBody, err := ioutil.ReadAll(quotedprintable.NewReader(bytes.NewReader(msg.Body)))
+		if err != nil {
+			log.Warnw("Could not decode quoted-printable, treating like an attachment", "err", err)
+			goto file
+		}
+		msg.Body = decBody
+	} else if result.Header.Get("Content-Transfer-Encoding") == "base64" {
+		unspacedBody := normalizeForBase64(msg.Body)
+		decBody := make([]byte, base64.StdEncoding.DecodedLen(len(unspacedBody)))
+		n, err := base64.StdEncoding.Decode(decBody, unspacedBody)
+		if err != nil {
+			log.Warnw("Could not decode base64, treating like an attachment", "nbytes", n, "err", err)
+			goto file
+		}
+		msg.Body = decBody
+	}
+	//// Body Charset
 	if strings.HasPrefix(ctype, "text") && !strings.Contains(result.Header.Get("Content-Disposition"), "attachment") {
 		mediatype, params, err := mime.ParseMediaType(ctype)
 		if err != nil {
@@ -126,7 +152,7 @@ func jsonifyMsg(msg email.Message, log *zap.SugaredLogger) JMessage {
 			strings.Contains(mediatype, "html"),
 			log)
 		if err != nil {
-			log.Warnw("Could not decode body, treating like an attachment", "charset", charset, "err", err)
+			log.Warnw("Could not decode charset, treating like an attachment", "charset", charset, "err", err)
 			goto file
 		}
 		result.TextBody = string(decoded)
@@ -277,4 +303,20 @@ func main() {
 		}
 		wg.Wait()
 	}
+}
+
+func normalizeForBase64(body []byte) []byte {
+	// SIMD-accelerated base64 can't skip over extra crap
+	return bytes.Map(func(r rune) rune {
+		if (r >= '0' && r <= '9') || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || r == '+' || r == '/' || r == '=' {
+			return r
+		}
+		if r == ',' || r == '_' || r == ':' {
+			return '/'
+		}
+		if r == '-' {
+			return '+'
+		}
+		return -1
+	}, body)
 }

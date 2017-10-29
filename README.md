@@ -8,7 +8,7 @@ A MIME email indexer for [ElasticSearch](https://www.elastic.co/products/elastic
 - decodes [a ton of character sets](https://github.com/golang/text/blob/master/encoding/htmlindex/tables.go), with [autodetection](https://github.com/gogits/chardet) when needed
 - is observable: uses [structured logging](https://github.com/uber-go/zap), optionally exposes profiling and stats over HTTP
 - is fast: indexes multiple files in parallel, uses ElasticSearch's bulk index endpoint, [static JSON encoding](https://github.com/mailru/easyjson), SIMD accelerated [BLAKE2b hashing](https://github.com/minio/blake2b-simd) and [base64 decoding](https://github.com/myfreeweb/go-base64-simd)
-- is (mostly) robust: tested on a large real-world mail archive, did not crash, most mail was parsed correctly, but some messages were skipped (weird EOFs, base64 and quoted-printable errors)
+- is (mostly) robust: tested on a large real-world mail archive, did not crash, most mail was parsed correctly, but some messages were skipped (weird EOFs, quoted-printable errors)
 
 ## Usage
 

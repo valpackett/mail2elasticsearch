@@ -37,6 +37,8 @@ func easyjson89aae3efDecodeGithubComMyfreewebMail2elasticsearch(in *jlexer.Lexer
 			continue
 		}
 		switch key {
+		case "_id":
+			out.Id = string(in.String())
 		case "h":
 			if in.IsNull() {
 				in.Skip()
@@ -151,6 +153,14 @@ func easyjson89aae3efEncodeGithubComMyfreewebMail2elasticsearch(out *jwriter.Wri
 	out.RawByte('{')
 	first := true
 	_ = first
+	if in.Id != "" {
+		if !first {
+			out.RawByte(',')
+		}
+		first = false
+		out.RawString("\"_id\":")
+		out.String(string(in.Id))
+	}
 	if len(in.Header) != 0 {
 		if !first {
 			out.RawByte(',')
