@@ -124,7 +124,7 @@ func jsonifyMsg(msg email.Message, log *zap.SugaredLogger) JMessage {
 		}
 		msg.Body = decBody
 	} else if result.Header.Get("Content-Transfer-Encoding") == "base64" {
-		unspacedBody := normalizeForBase64(msg.Body)
+		unspacedBody := base64.SkipPrepass(msg.Body)
 		decBody := make([]byte, base64.StdEncoding.DecodedLen(len(unspacedBody)))
 		n, err := base64.StdEncoding.Decode(decBody, unspacedBody)
 		if err != nil {
@@ -303,20 +303,4 @@ func main() {
 		}
 		wg.Wait()
 	}
-}
-
-func normalizeForBase64(body []byte) []byte {
-	// SIMD-accelerated base64 can't skip over extra crap
-	return bytes.Map(func(r rune) rune {
-		if (r >= '0' && r <= '9') || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || r == '+' || r == '/' || r == '=' {
-			return r
-		}
-		if r == ',' || r == '_' || r == ':' {
-			return '/'
-		}
-		if r == '-' {
-			return '+'
-		}
-		return -1
-	}, body)
 }

@@ -35,7 +35,7 @@
   branch = "master"
   name = "github.com/myfreeweb/go-base64-simd"
   packages = ["base64"]
-  revision = "91bc30d557819928271da81b60fb001d52b136cf"
+  revision = "a996ba366c4249e6fd8967e1257ba0752b9e6628"
 
 [[projects]]
   branch = "master"
