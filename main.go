@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/base64"
 	_ "expvar"
 	"flag"
 	"fmt"
@@ -24,7 +25,6 @@ import (
 	"github.com/dchest/safefile"
 	"github.com/mailru/easyjson"
 	blake2b "github.com/minio/blake2b-simd"
-	"github.com/myfreeweb/go-base64-simd/base64"
 	"github.com/myfreeweb/go-email/email"
 	zap "go.uber.org/zap"
 	elastic "gopkg.in/olivere/elastic.v5"
@@ -124,9 +124,8 @@ func jsonifyMsg(msg email.Message, log *zap.SugaredLogger) JMessage {
 		}
 		msg.Body = decBody
 	} else if result.Header.Get("Content-Transfer-Encoding") == "base64" {
-		unspacedBody := base64.SkipPrepass(msg.Body)
-		decBody := make([]byte, base64.StdEncoding.DecodedLen(len(unspacedBody)))
-		n, err := base64.StdEncoding.Decode(decBody, unspacedBody)
+		decBody := make([]byte, base64.StdEncoding.DecodedLen(len(msg.Body)))
+		n, err := base64.StdEncoding.Decode(decBody, msg.Body)
 		if err != nil {
 			log.Warnw("Could not decode base64, treating like an attachment", "nbytes", n, "err", err)
 			goto file
