@@ -42,7 +42,7 @@ const indexSettings string = `{
 			"properties": {
 				"h": {
 					"properties": {
-						"Date": { "type": "date", "format": "EEE, dd MMM yyyy HH:mm:ss Z" },
+						"Date": { "type": "date", "format": "EEE, dd MMM yyyy HH:mm:ss Z||dd MMM yyyy HH:mm:ss Z||dd MMM yyyy HH:mm:ss", "ignore_malformed": true },
 						"Dkim-Signature": { "type": "text", "index": false },
 						"X-Google-Dkim-Signature": { "type": "text", "index": false },
 						"MIME-Version": { "type": "keyword" }
