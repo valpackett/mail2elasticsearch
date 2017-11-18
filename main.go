@@ -71,6 +71,30 @@ const indexSettings string = `{
 							"properties": {
 								"Content-Disposition": { "type": "text" }
 							}
+						},
+						"p": {
+							"dynamic": false,
+							"properties": {
+								"t": { "type": "text" },
+								"h": {
+									"dynamic": false,
+									"properties": {
+										"Content-Disposition": { "type": "text" }
+									}
+								},
+								"p": {
+									"dynamic": false,
+									"properties": {
+										"t": { "type": "text" },
+										"h": {
+											"dynamic": false,
+											"properties": {
+												"Content-Disposition": { "type": "text" }
+											}
+										}
+									}
+								}
+							}
 						}
 					}
 				},
