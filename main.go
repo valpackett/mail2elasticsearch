@@ -5,8 +5,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/base64"
+	"encoding/hex"
 	_ "expvar"
 	"flag"
 	"fmt"
@@ -16,6 +16,7 @@ import (
 	"mime/quotedprintable"
 	"net/http"
 	_ "net/http/pprof"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -26,8 +27,8 @@ import (
 	"github.com/mailru/easyjson"
 	blake2b "github.com/minio/blake2b-simd"
 	"github.com/myfreeweb/go-email/email"
-	zap "go.uber.org/zap"
 	elastic "github.com/olivere/elastic"
+	zap "go.uber.org/zap"
 )
 
 var attachdir = flag.String("attachdir", "files", "path to the attachments directory")
@@ -41,23 +42,44 @@ const indexSettings string = `{
 		"index": {
 			"sort.field": "h.Date",
 			"sort.order": "desc",
-			"refresh_interval": "15s",
-			"mapping.total_fields.limit": 90000000
+			"refresh_interval": "15s"
 		}
 	},
 	"mappings": {
 		"msg": {
+			"dynamic": false,
 			"properties": {
 				"h": {
+					"dynamic": false,
 					"properties": {
 						"Date": { "type": "date", "format": "EEE, dd MMM yyyy HH:mm:ss Z||dd MMM yyyy HH:mm:ss Z||dd MMM yyyy HH:mm:ss||dd MMM yyyy HH:mm", "ignore_malformed": true },
-						"Dkim-Signature": { "type": "text", "index": false },
-						"X-Google-Dkim-Signature": { "type": "text", "index": false },
-						"MIME-Version": { "type": "keyword" }
+						"Subject": { "type": "text" },
+						"From": { "type": "text" },
+						"To": { "type": "text" },
+						"Reply-To": { "type": "text" },
+						"In-Reply-To": { "type": "keyword" },
+						"References": { "type": "keyword" }
 					}
 				},
-				"a": { "type": "keyword" },
-				"t": { "type": "text" }
+				"t": { "type": "text" },
+				"p": {
+					"dynamic": false,
+					"properties": {
+						"t": { "type": "text" },
+						"h": {
+							"dynamic": false,
+							"properties": {
+								"Content-Disposition": { "type": "text" }
+							}
+						}
+					}
+				},
+				"sub": {
+					"dynamic": false,
+					"properties": {
+						"t": { "type": "text" }
+					}
+				}
 			}
 		}
 	}
@@ -83,7 +105,7 @@ func jsonifyMsg(msg email.Message, log *zap.SugaredLogger) JMessage {
 	}
 	result := JMessage{
 		Id:         msg.Header.Get("Message-Id"),
-		Header:     msg.Header,
+		Header:     make(map[string][]string),
 		Preamble:   msg.Preamble,
 		Epilogue:   msg.Epilogue,
 		Parts:      []*JMessage{},
@@ -92,17 +114,19 @@ func jsonifyMsg(msg email.Message, log *zap.SugaredLogger) JMessage {
 		Attachment: "",
 	}
 	//// Headers
-	delete(result.Header, "Message-Id")
-	for k, vs := range result.Header {
+	for k, vs := range msg.Header {
+		kk := textproto.CanonicalMIMEHeaderKey(k)
+		result.Header[kk] = vs
 		for i, v := range vs {
 			dec, err := wordDecoder.DecodeHeader(v)
 			if err != nil {
-				log.Warnw("Could not decode header", "name", k, "index", i, "value", v, "err", err)
+				log.Warnw("Could not decode header", "name", kk, "index", i, "value", v, "err", err)
 				continue
 			}
-			result.Header[k][i] = dec
+			result.Header[kk][i] = dec
 		}
 	}
+	delete(result.Header, "Message-Id")
 	result.Header["Date"] = stripSpaceAndComments(result.Header["Date"])
 	result.Header["From"] = splitAddrs(result.Header["From"])
 	result.Header["To"] = splitAddrs(result.Header["To"])
