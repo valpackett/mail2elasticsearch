@@ -23,7 +23,7 @@
   branch = "master"
   name = "github.com/mailru/easyjson"
   packages = [".","buffer","jlexer","jwriter"]
-  revision = "4d347d79dea0067c945f374f990601decb08abb5"
+  revision = "61a3095943e4e55a9305ac68a71cd0bd191d6096"
 
 [[projects]]
   branch = "master"
@@ -42,6 +42,12 @@
   name = "github.com/myfreeweb/go-email"
   packages = ["email"]
   revision = "5ebbe4b970f65566dfaae38e30db4f5b6e8f8b2f"
+
+[[projects]]
+  name = "github.com/olivere/elastic"
+  packages = ["."]
+  revision = "482b5f3735c46598931a3b75dd69e1480ea67f4b"
+  version = "v5.0.55"
 
 [[projects]]
   name = "github.com/pkg/errors"
@@ -64,8 +70,8 @@
 [[projects]]
   name = "go.uber.org/atomic"
   packages = ["."]
-  revision = "4e336646b2ef9fc6e47be8e21594178f98e5ebcf"
-  version = "v1.2.0"
+  revision = "8474b86a5a6f79c443ce4b2992817ff32cf208b8"
+  version = "v1.3.1"
 
 [[projects]]
   name = "go.uber.org/multierr"
@@ -83,17 +89,17 @@
   branch = "master"
   name = "golang.org/x/text"
   packages = ["encoding","encoding/charmap","encoding/htmlindex","encoding/internal","encoding/internal/identifier","encoding/japanese","encoding/korean","encoding/simplifiedchinese","encoding/traditionalchinese","encoding/unicode","internal/gen","internal/tag","internal/utf8internal","language","runes","transform","unicode/cldr"]
-  revision = "6eab0e8f74e86c598ec3b6fad4888e0c11482d48"
+  revision = "88f656faf3f37f690df1a32515b479415e1a6769"
 
 [[projects]]
   name = "gopkg.in/olivere/elastic.v5"
-  packages = [".","config","uritemplates"]
-  revision = "171ce647da4acfb30ffc99981d66d80bdea6bcee"
-  version = "v5.0.53"
+  packages = ["config","uritemplates"]
+  revision = "482b5f3735c46598931a3b75dd69e1480ea67f4b"
+  version = "v5.0.55"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "c80200ba78b2053cafa6d4a8fd90b95349c654759e5b707b1adf2432331e8fc6"
+  inputs-digest = "e6fe25aee4cb6ddf68f4bf5f821ffa0142e8f502cbcc90c4e930d1005238299f"
   solver-name = "gps-cdcl"
   solver-version = 1

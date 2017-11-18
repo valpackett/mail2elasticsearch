@@ -27,7 +27,7 @@ import (
 	blake2b "github.com/minio/blake2b-simd"
 	"github.com/myfreeweb/go-email/email"
 	zap "go.uber.org/zap"
-	elastic "gopkg.in/olivere/elastic.v5"
+	elastic "github.com/olivere/elastic"
 )
 
 var attachdir = flag.String("attachdir", "files", "path to the attachments directory")
@@ -37,12 +37,20 @@ var doInit = flag.Bool("init", false, "whether to initialize the index instead o
 var srvAddr = flag.String("srvaddr", "", "address for the pprof/expvar server to listen on")
 
 const indexSettings string = `{
+	"settings": {
+		"index": {
+			"sort.field": "h.Date",
+			"sort.order": "desc",
+			"refresh_interval": "15s",
+			"mapping.total_fields.limit": 90000000
+		}
+	},
 	"mappings": {
 		"msg": {
 			"properties": {
 				"h": {
 					"properties": {
-						"Date": { "type": "date", "format": "EEE, dd MMM yyyy HH:mm:ss Z||dd MMM yyyy HH:mm:ss Z||dd MMM yyyy HH:mm:ss", "ignore_malformed": true },
+						"Date": { "type": "date", "format": "EEE, dd MMM yyyy HH:mm:ss Z||dd MMM yyyy HH:mm:ss Z||dd MMM yyyy HH:mm:ss||dd MMM yyyy HH:mm", "ignore_malformed": true },
 						"Dkim-Signature": { "type": "text", "index": false },
 						"X-Google-Dkim-Signature": { "type": "text", "index": false },
 						"MIME-Version": { "type": "keyword" }
