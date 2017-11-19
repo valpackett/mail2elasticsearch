@@ -57,8 +57,8 @@ const indexSettings string = `{
 						"From": { "type": "text" },
 						"To": { "type": "text" },
 						"Reply-To": { "type": "text" },
-						"In-Reply-To": { "type": "keyword" },
-						"References": { "type": "keyword" }
+						"In-Reply-To": { "type": "keyword", "ignore_above": 10922 },
+						"References": { "type": "keyword", "ignore_above": 10922 }
 					}
 				},
 				"t": { "type": "text" },
