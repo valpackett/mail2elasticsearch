@@ -56,7 +56,11 @@ const indexSettings string = `{
 						"Subject": { "type": "text" },
 						"From": { "type": "text" },
 						"To": { "type": "text" },
+						"Cc": { "type": "text" },
+						"S-From": { "type": "keyword", "ignore_above": 10922 },
+						"S-To": { "type": "keyword", "ignore_above": 10922 },
 						"Reply-To": { "type": "text" },
+						"Thread-Index": { "type": "keyword", "ignore_above": 10922 },
 						"In-Reply-To": { "type": "keyword", "ignore_above": 10922 },
 						"References": { "type": "keyword", "ignore_above": 10922 }
 					}
@@ -152,12 +156,21 @@ func jsonifyMsg(msg email.Message, log *zap.SugaredLogger) JMessage {
 	}
 	delete(result.Header, "Message-Id")
 	result.Header["Date"] = stripSpaceAndComments(result.Header["Date"])
+	result.Header["S-From"] = extractOnlyAddrs(result.Header["From"])
+	result.Header["S-To"] = append(append(
+		extractOnlyAddrs(result.Header["To"]),
+		extractOnlyAddrs(result.Header["Cc"])...),
+		extractOnlyAddrs(result.Header["Bcc"])...)
 	result.Header["From"] = splitAddrs(result.Header["From"])
 	result.Header["To"] = splitAddrs(result.Header["To"])
 	result.Header["Cc"] = splitAddrs(result.Header["Cc"])
 	result.Header["Bcc"] = splitAddrs(result.Header["Bcc"])
 	result.Header["Return-Path"] = splitAddrs(result.Header["Return-Path"])
 	result.Header["Delivered-To"] = splitAddrs(result.Header["Delivered-To"])
+	result.Header["X-Failed-Recipients"] = splitAddrs(result.Header["X-Failed-Recipients"])
+	result.Header["Thread-Index"] = splitAddrs(result.Header["Thread-Index"])
+	result.Header["In-Reply-To"] = splitAddrs(result.Header["In-Reply-To"])
+	result.Header["References"] = splitAddrs(result.Header["References"])
 	//// Parts
 	if msg.SubMessage != nil {
 		submsg := jsonifyMsg(*msg.SubMessage, log.With("submsg", true))

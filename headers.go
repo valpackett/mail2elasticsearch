@@ -16,6 +16,16 @@ func splitAddrs(vals []string) []string {
 	return result
 }
 
+var addrRegex = regexp.MustCompile(`[\p{L}\d.!#$%&*+\/=?^_{|}~-]+@[\p{L}\d-.]+`)
+
+func extractOnlyAddrs(vals []string) []string {
+	result := make([]string, 0)
+	for _, val := range vals {
+		result = append(result, addrRegex.FindAllString(val, -1)...)
+	}
+	return result
+}
+
 var whitespaceRegex = regexp.MustCompile(`\s+`)
 var commentRegex = regexp.MustCompile(`\([^\)]*\)`)
 
